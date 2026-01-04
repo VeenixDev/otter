@@ -1,0 +1,18 @@
+{
+  "name": "otter",
+  "version": "1.0.0",
+  "description": "This project contains the minimal viable compiler for the otter language.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "compile": "ts-node src/index.ts && clang out/output.ll -o out/output"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "prettier": "^3.7.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.3"
+  },
+  "private": true
+}

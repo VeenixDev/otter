@@ -1,0 +1,3 @@
+function main(argc: int, argv: *string[]): int {
+    printf("Hello World!");
+}
