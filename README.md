@@ -13,3 +13,5 @@ The heart of the approach Otter lang is taking is to heavily utilize Domain Bind
 ## What is the current progress?
 
 Currently, it is possible to compile the example "Hello World" program in "main.otter" and get an executable binary. But many shortcuts are taken to be able to show the end-to-end compilation capabilities.
+
+To see how more notes on how this compiler is planned and what the future might look like, you can have a look in the `docs` directory which contains diagrams and explanations to how and why certain things are the way they are.
