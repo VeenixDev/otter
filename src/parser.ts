@@ -1,6 +1,7 @@
-import { Token, Tokens } from './lexer';
+import { Position, Token, Tokens } from './lexer';
 import { randomUUID } from 'node:crypto';
 
+// TODO: Reimplement ASTNode to be typesafe
 class ASTNode {
 	public type: string;
 	public children: ASTNode[];
@@ -20,6 +21,8 @@ class ASTNode {
 	}
 }
 
+// TODO: Reimplement Parser to have better separation of layers
+// TODO: Clean up ScopeStack and AST management
 class Parser {
 	private tokens: Token[];
 	private index;
@@ -33,7 +36,7 @@ class Parser {
 		this.ast = [];
 	}
 
-	private peek(amount: number = 1): Token | undefined {
+	private peek(amount: number = 0): Token | undefined {
 		if (this.index + amount > this.tokens.length) {
 			return undefined;
 		}
@@ -106,6 +109,7 @@ class Parser {
 		if (this.scopeStack.length !== 0) {
 			throw new Error(`Function can not be declare inside another function.`);
 		}
+		this.advance();
 		const startPosition = this.tokens[this.index].start;
 		const functionArguments: { [key: string]: unknown } = {};
 
@@ -153,7 +157,7 @@ class Parser {
 	}
 
 	private parseIdentifier(): ASTNode {
-		const identifier = this.peek(0)!;
+		const identifier = this.advanceAndReturnIfTypeMatch(Tokens.IDENTIFIER)!;
 		let peekToken = this.peek();
 
 		if (!peekToken) {
@@ -194,7 +198,6 @@ class Parser {
 						);
 					}
 					callArguments.push(argumentToken);
-					this.advance();
 				}
 
 				void this.advanceAndReturnIfTypeMatch(Tokens.CLOSE_PAREN);
@@ -224,66 +227,113 @@ class Parser {
 	}
 
 	private parseStringLiteral(): ASTNode {
-		const currentToken = this.peek()!;
+		const currentToken = this.advanceAndReturnIfTypeMatch(Tokens.STRING_LITERAL)!;
 
 		return new ASTNode('STRING_LITERAL', [], {
 			value: currentToken.value,
-			positions: { start: currentToken.start, end: currentToken.end },
+			length: currentToken.value.length,
+			positions: this.getPositionFromToken(currentToken),
 		});
 	}
 
-	private parseNumericLiteral(): ASTNode {
-		const currentToken = this.peek(0)!;
-		const numLitNextToken = this.peek();
+	private getPositionFromToken(token: Token): { start: Position; end: Position } {
+		return { start: token.start, end: token.end };
+	}
 
-		switch (numLitNextToken?.type) {
-			case 'ADD':
-				let numLitTokenAfterOperator = this.peek(2);
-				if (numLitTokenAfterOperator?.type === Tokens.NUMERIC_LITERAL) {
-					this.advance(2);
-					const additionNode = new ASTNode('BINARY_EXPRESSION', [], {
-						operation: 'ADDITION',
-					});
-					this.ast.push(additionNode);
-					return additionNode;
-				} else {
-					throw new Error(
-						`Expected NUMERIC_LITERAL at ${JSON.stringify(numLitNextToken.start)} but got ${numLitTokenAfterOperator?.type}`
-					);
-				}
+	private parseNumericLiteral(): ASTNode {
+		const currentToken = this.advanceAndReturnIfTypeMatch(Tokens.NUMERIC_LITERAL)!;
+		return new ASTNode('NUMBER', [], { value: currentToken.value, position: this.getPositionFromToken(currentToken) });
+	}
+
+	private isOperator(token: Token): boolean {
+		return [
+			Tokens.ADD,
+			Tokens.SUBTRACT,
+			Tokens.ASTERISK,
+			Tokens.DIVIDE,
+			Tokens.MODULO,
+		].includes(token.type);
+	}
+
+	private getPrecedence(token: Token): number {
+		switch (token.type) {
+			case Tokens.EQUALS:
+				return 1;
+			case Tokens.OPEN_POINTY:
+			case Tokens.CLOSE_POINTY:
+				return 2;
+			case Tokens.ADD:
+			case Tokens.SUBTRACT:
+				return 3;
+			case Tokens.ASTERISK:
+			case Tokens.DIVIDE:
+			case Tokens.MODULO:
+				return 4;
 			default:
-				throw new Error('Unsupported type "' + currentToken.type + '"');
+				return 0;
 		}
 	}
 
+	private parseExpression(minPrecedence = 0): ASTNode {
+		let left = this.parseNumericLiteral(); // Erstmal die Zahl holen
+
+		while (true) {
+			const opToken = this.peek();
+			if (!opToken || !this.isOperator(opToken)) break;
+
+			const precedence = this.getPrecedence(opToken);
+			if (precedence < minPrecedence) break;
+
+			this.advance(); // Den Operator konsumieren
+			const right = this.parseExpression(precedence + 1); // Rekursion für die rechte Seite
+
+			left = new ASTNode('BINARY_EXPRESSION', [left, right], {
+				operation: opToken.type,
+			});
+		}
+
+		return left;
+	}
+
 	public parseToken(token: Token): ASTNode | undefined {
+		let returnValue: ASTNode | undefined = undefined;
 		switch (token.type) {
 			case Tokens.NUMERIC_LITERAL:
-				return this.parseNumericLiteral();
+				returnValue = this.parseExpression();
+				this.addToCurrentScope(returnValue);
+				break;
 			case Tokens.FUNCTION:
-				return this.parseFunctionSignature();
+				returnValue = this.parseFunctionSignature();
+				break;
 			case Tokens.CLOSE_CURLY:
 				const closedScope = this.scopeStack.pop();
 
 				if (closedScope?.type === Tokens.FUNCTION) {
 				}
-				return undefined;
+				this.advance();
+				returnValue = undefined;
+				break;
 			case Tokens.STRING_LITERAL:
-				return this.parseStringLiteral();
+				returnValue = this.parseStringLiteral();
+				break;
 			case Tokens.IDENTIFIER:
 				const identifier = this.parseIdentifier();
 				this.addToCurrentScope(identifier);
-				return identifier;
+				returnValue = identifier;
+				break;
 			case Tokens.EOF:
 				if (this.scopeStack.length !== 0) {
 					throw new Error('Unexpected end of file.');
 				}
-				return new ASTNode('EOF', []);
+				returnValue = new ASTNode('EOF', []);
+				break;
 			default:
 				throw new Error(
 					`Unexpected token type ${token.type} at position ${JSON.stringify(token.start)}`
 				);
 		}
+
+		return returnValue;
 	}
 
 	public parse(): ASTNode[] {
@@ -293,7 +343,6 @@ class Parser {
 			if (node?.type === 'EOF') {
 				return this.ast;
 			}
-			this.advance();
 		}
 		throw new Error('Unexpected end of file, did not encounter Token EOF');
 	}

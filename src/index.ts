@@ -10,7 +10,7 @@ if (!file) {
 }
 
 if (fs.existsSync('out')) {
-	fs.rmdirSync('out');
+	fs.rmSync('out', { recursive: true, force: true });
 }
 
 fs.mkdirSync('out');

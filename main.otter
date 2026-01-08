@@ -1,3 +1,4 @@
 function main(argc: int, argv: *string[]): int {
+5 + 3
     printf("Hello World!");
 }
