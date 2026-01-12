@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import { Lexer } from './lexer';
 import { Parser } from './parser';
-import { LLVMGenerator } from './generator';
+// import { LLVMGenerator } from './generator';
 
-const file = fs.readFileSync('main.otter', 'utf8');
+const file = fs.readFileSync('examples/hello_world.otter', 'utf8');
 
 if (!file) {
 	throw new Error('Could not find file');
@@ -33,12 +33,15 @@ const ast = parser.parse();
 fs.writeFileSync('out/ast.json', JSON.stringify(ast, null, 2));
 
 console.info('Completed Parser result can be found in "ast.json"');
-console.info('Starting LLVM Generator');
 
-const generator = new LLVMGenerator(ast);
+console.warn('Skipping LLVM generation, because the generator is not yet compatible with the new AST-structure.');
+process.exit(1);
+// console.info('Starting LLVM Generator');
 
-const output = generator.generate();
-
-fs.writeFileSync('out/output.ll', output);
-
-console.info('Completed LLVM Generator result can be found in "output.ll"');
+// const generator = new LLVMGenerator(ast);
+//
+// const output = generator.generate();
+//
+// fs.writeFileSync('out/output.ll', output);
+//
+// console.info('Completed LLVM Generator result can be found in "output.ll"');

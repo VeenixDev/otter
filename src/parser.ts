@@ -1,351 +1,333 @@
 import { Position, Token, Tokens } from './lexer';
-import { randomUUID } from 'node:crypto';
 
-// TODO: Reimplement ASTNode to be typesafe
-class ASTNode {
-	public type: string;
-	public children: ASTNode[];
-	public data: { [key: string]: unknown };
-	public id: string;
+type Expression =
+	| {
+			type: 'BINARY_EXPRESSION';
+			data: { left: Expression; right: Expression; operator: string };
+			position: Position;
+	  }
+	| { type: 'STRING_LITERAL'; data: { value: string }; position: Position }
+	| {
+			type: 'FUNCTION_CALL';
+			data: { arguments: Expression[]; functionName: string };
+			position: Position;
+	  };
 
-	constructor(
-		type: string,
-		children: ASTNode[],
-		data?: { [key: string]: unknown }
-	) {
-		this.type = type;
-		this.children = children;
-		this.id = randomUUID();
+type Argument = {
+	name: string;
+	type: Type;
+};
 
-		this.data = data ?? {};
-	}
-}
+type Type = {
+	isPrimitive: boolean;
+	isArray: boolean;
+	isPointer: boolean;
+	hasGeneric: boolean;
+	genericType: Type | null;
+	typeName: string;
+};
 
-// TODO: Reimplement Parser to have better separation of layers
-// TODO: Clean up ScopeStack and AST management
+type Statement =
+	| { type: 'BLOCK'; data: { body: Statement[] }; position: Position }
+	| {
+			type: 'FUNCTION';
+			data: {
+				name: string;
+				arguments: Argument[];
+				body: Statement;
+				returnType: Type;
+			};
+			position: Position;
+	  }
+	| {
+			type: 'VAR_DECL';
+			data: { name: string; type: Type; value: Expression };
+			position: Position;
+	  }
+	| { type: 'IMPORT'; data: { namespace: string }; position: Position }
+	| {
+			type: 'EXPRESSION_STATEMENT';
+			data: { expression: Expression };
+			position: Position;
+	  };
+
 class Parser {
-	private tokens: Token[];
-	private index;
-	private ast: ASTNode[];
-	private scopeStack: ASTNode[];
+	private readonly tokens: Token[];
+	private index: number;
+	private ast: Statement[];
+
+	private readonly primitiveTypes: Set<string> = new Set([
+		'i8',
+		'i16',
+		'i32',
+		'i64',
+		'u8',
+		'u16',
+		'u32',
+		'u64',
+		'f32',
+		'f64',
+		'bool',
+	]);
 
 	constructor(tokens: Token[]) {
 		this.tokens = tokens;
 		this.index = 0;
-		this.scopeStack = [];
 		this.ast = [];
 	}
 
-	private peek(amount: number = 0): Token | undefined {
-		if (this.index + amount > this.tokens.length) {
-			return undefined;
-		}
-
-		return this.tokens[this.index + amount];
+	private peek(): Token | undefined {
+		return this.tokens[this.index];
 	}
 
-	private advance(amount: number = 1): void {
-		if (this.index + amount > this.tokens.length) {
-			throw new Error('Could not advance, not enough tokens.');
+	private consume(type: Tokens): void {
+		if (this.index + 1 >= this.tokens.length) {
+			throw new Error('Could not consume, no next token.');
+		}
+		if (this.peek()?.type !== type) {
+			throw new Error(
+				`Expected ${type} at ${this.positionString()} but got ${this.peek()?.type}`
+			);
 		}
 
 		this.index++;
 	}
 
-	private advanceAndReturnIfTypeMatch(
-		type: Tokens,
-		throwOnMismatch: boolean = true
-	): Token | undefined {
-		const nextToken = this.peek();
-		if (nextToken && nextToken.type === type) {
-			this.advance();
-			return nextToken;
-		} else if (throwOnMismatch) {
-			if (nextToken) {
+	private match(type: Tokens): boolean {
+		if (this.peek()?.type === type) {
+			this.consume(type);
+			return true;
+		}
+		return false;
+	}
+
+	private parseStringLiteral(): Expression {
+		if (this.peek()?.type !== Tokens.STRING_LITERAL) {
+			throw new Error(
+				`Expected string literal at ${this.positionString()} but got ${this.peek()?.type}`
+			);
+		}
+		const expression: Expression = {
+			type: 'STRING_LITERAL',
+			data: {
+				value: this.peek()!.value,
+			},
+			position: this.currentPosition(),
+		};
+		this.consume(Tokens.STRING_LITERAL);
+		return expression;
+	}
+
+	private parseExpression(): Expression {
+		switch (this.peek()?.type) {
+			case Tokens.STRING_LITERAL:
+				return this.parseStringLiteral();
+			default:
 				throw new Error(
-					`Expected ${type} at position ${JSON.stringify(nextToken.start)} but got ${nextToken.type}.`
+					`Unexpected token ${this.peek()?.type} for expression at ${this.positionString()}`
 				);
-			} else {
-				throw new Error(
-					`Expected ${type} after position ${JSON.stringify(this.tokens[this.index].start)} but no token was found.`
-				);
-			}
 		}
 	}
 
-	private parseTypeSignature(): ASTNode {
-		let genericType: Token | undefined = undefined;
-		let hasGeneric = false;
-		let isPointer =
-			this.advanceAndReturnIfTypeMatch(Tokens.ASTERISK, false) !== undefined;
-		let isArray = false;
+	private parseBlock(): Statement {
+		const startPosition = this.currentPosition();
+		this.consume(Tokens.OPEN_CURLY);
+		const body: Statement[] = [];
 
-		const type: Token = this.advanceAndReturnIfTypeMatch(Tokens.IDENTIFIER)!;
-
-		if (
-			this.advanceAndReturnIfTypeMatch(Tokens.OPEN_POINTY, false) !== undefined
-		) {
-			genericType = this.advanceAndReturnIfTypeMatch(Tokens.IDENTIFIER)!;
-			void this.advanceAndReturnIfTypeMatch(Tokens.CLOSE_POINTY);
-			hasGeneric = true;
-		}
-		if (
-			this.advanceAndReturnIfTypeMatch(Tokens.OPEN_SQUARE, false) !== undefined
-		) {
-			void this.advanceAndReturnIfTypeMatch(Tokens.CLOSE_SQUARE);
-			isArray = true;
+		while (this.peek() && this.peek()!.type !== Tokens.CLOSE_CURLY) {
+			body.push(this.parseLocalStatement());
 		}
 
-		return new ASTNode('TYPE', [], {
+		this.consume(Tokens.CLOSE_CURLY);
+		return {
+			type: 'BLOCK',
+			position: startPosition,
+			data: {
+				body,
+			},
+		};
+	}
+
+	private parseArgument(): Argument {
+		if (this.peek()?.type !== Tokens.IDENTIFIER) {
+			throw new Error(
+				`Expected IDENTIFIER at ${this.positionString()} but got ${this.peek()?.type}`
+			);
+		}
+		const name = this.peek()!.value;
+		this.consume(Tokens.IDENTIFIER);
+		this.consume(Tokens.COLON);
+		const type = this.parseType();
+
+		return {
 			type,
+			name,
+		};
+	}
+
+	private parseType(): Type {
+		const isPointer = this.match(Tokens.ASTERISK);
+		if (this.peek()?.type !== Tokens.IDENTIFIER) {
+			throw new Error(
+				`Expected IDENTIFIER at position ${this.positionString()} but got ${this.peek()?.type}`
+			);
+		}
+		const typeName = this.peek()!.value;
+		this.consume(Tokens.IDENTIFIER);
+		const hasGeneric = this.match(Tokens.OPEN_POINTY);
+		let genericType: Type | null = null;
+		if (hasGeneric) {
+			genericType = this.parseType();
+			this.consume(Tokens.CLOSE_POINTY);
+		}
+		const isArray = this.match(Tokens.OPEN_SQUARE);
+		if (isArray) {
+			this.consume(Tokens.CLOSE_SQUARE);
+		}
+
+		return {
 			genericType,
+			isArray,
 			hasGeneric,
 			isPointer,
-			isArray,
-		});
+			typeName,
+			isPrimitive: this.primitiveTypes.has(typeName),
+		};
 	}
 
-	private parseFunctionSignature(): ASTNode {
-		if (this.scopeStack.length !== 0) {
-			throw new Error(`Function can not be declare inside another function.`);
-		}
-		this.advance();
-		const startPosition = this.tokens[this.index].start;
-		const functionArguments: { [key: string]: unknown } = {};
-
-		const identifier = this.advanceAndReturnIfTypeMatch(Tokens.IDENTIFIER);
-
-		void this.advanceAndReturnIfTypeMatch(Tokens.OPEN_PAREN);
-		while (true) {
-			let nextToken = this.peek();
-			if (!nextToken) {
-				throw new Error(
-					`Failed to parse function signature at position ${JSON.stringify(startPosition)}, tokens ended unexpectedly.`
-				);
-			}
-			if (nextToken.type === Tokens.COMMA) {
-				if (Object.keys(functionArguments).length === 0) {
-					throw new Error(
-						`Expected IDENTIFIER but got COMMA at position ${JSON.stringify(nextToken.start)}, tokens ended unexpectedly.`
-					);
-				}
-				this.advance();
-				continue;
-			}
-			if (nextToken.type === Tokens.CLOSE_PAREN) {
-				break;
-			}
-			const argumentName = this.advanceAndReturnIfTypeMatch(Tokens.IDENTIFIER)!;
-			this.advance();
-			functionArguments[argumentName.value] = this.parseTypeSignature();
-		}
-
-		void this.advanceAndReturnIfTypeMatch(Tokens.CLOSE_PAREN);
-		void this.advanceAndReturnIfTypeMatch(Tokens.COLON);
-		const returnType = this.parseTypeSignature();
-		void this.advanceAndReturnIfTypeMatch(Tokens.OPEN_CURLY);
-
-		const functionNode = new ASTNode('FUNCTION', [], {
-			identifier,
-			arguments: functionArguments,
-			returnType,
-			hasExplicitReturn: false,
-		});
-		this.scopeStack.push(functionNode);
-		this.ast.push(functionNode);
-		return functionNode;
-	}
-
-	private parseIdentifier(): ASTNode {
-		const identifier = this.advanceAndReturnIfTypeMatch(Tokens.IDENTIFIER)!;
-		let peekToken = this.peek();
-
-		if (!peekToken) {
+	private parseFunction(): Statement {
+		const position = this.currentPosition();
+		this.consume(Tokens.FUNCTION);
+		if (this.peek()?.type !== Tokens.IDENTIFIER) {
 			throw new Error(
-				`Unexpected end of Tokens after position ${JSON.stringify(identifier.end)}`
+				`Expected function name at position ${this.positionString()}.`
 			);
 		}
+		const functionName = this.peek()!.value;
+		this.consume(Tokens.IDENTIFIER);
+		this.consume(Tokens.OPEN_PAREN);
+		const args: Argument[] = [];
 
-		switch (peekToken.type) {
-			case Tokens.OPEN_PAREN:
-				this.advance();
-
-				const callArguments: ASTNode[] = [];
-
-				while (true) {
-					let nextToken = this.peek();
-					if (!nextToken) {
-						throw new Error(
-							`Failed to parse function call at position ${JSON.stringify(identifier.start)}, tokens ended unexpectedly.`
-						);
-					}
-					if (nextToken.type === Tokens.COMMA) {
-						if (Object.keys(callArguments).length === 0) {
-							throw new Error(
-								`Expected IDENTIFIER but got COMMA at position ${JSON.stringify(nextToken.start)}, tokens ended unexpectedly.`
-							);
-						}
-						this.advance();
-						continue;
-					}
-					if (nextToken.type === Tokens.CLOSE_PAREN) {
-						break;
-					}
-					const argumentToken = this.parseToken(nextToken)!;
-					if (!argumentToken) {
-						throw new Error(
-							`Expected an expression at position ${JSON.stringify(nextToken.start)}.`
-						);
-					}
-					callArguments.push(argumentToken);
-				}
-
-				void this.advanceAndReturnIfTypeMatch(Tokens.CLOSE_PAREN);
-				void this.advanceAndReturnIfTypeMatch(Tokens.SEMI);
-				return new ASTNode('FUNCTION_CALL', [], {
-					arguments: callArguments,
-					functionIdentifier: identifier,
-				});
-			case Tokens.ASSIGN:
-				// TODO: Implement parsing of ASSIGN* tokens.
-				throw new Error('Not implemented yet!');
-			default:
-				throw new Error(
-					`Unexpected Token ${peekToken.type} at position ${JSON.stringify(peekToken.start)}`
-				);
+		if (this.peek()?.type !== Tokens.CLOSE_PAREN) {
+			do {
+				args.push(this.parseArgument());
+			} while (this.match(Tokens.COMMA));
 		}
+		this.consume(Tokens.CLOSE_PAREN);
+		this.consume(Tokens.COLON);
+		const returnType = this.parseType();
+
+		return {
+			type: 'FUNCTION',
+			data: {
+				name: functionName,
+				arguments: args,
+				body: this.parseBlock(),
+				returnType,
+			},
+			position,
+		};
 	}
 
-	private addToCurrentScope(node: ASTNode): void {
-		if (this.scopeStack.length === 0) {
+	private parseIdentifier(): Statement {
+		if (this.peek()?.type !== Tokens.IDENTIFIER) {
 			throw new Error(
-				'Could not add to current scope, because no scope exists.'
+				`Expected identifier at position ${this.positionString()} but got ${this.peek()?.type}`
 			);
 		}
-
-		this.scopeStack[this.scopeStack.length - 1].children.push(node);
-	}
-
-	private parseStringLiteral(): ASTNode {
-		const currentToken = this.advanceAndReturnIfTypeMatch(Tokens.STRING_LITERAL)!;
-
-		return new ASTNode('STRING_LITERAL', [], {
-			value: currentToken.value,
-			length: currentToken.value.length,
-			positions: this.getPositionFromToken(currentToken),
-		});
-	}
-
-	private getPositionFromToken(token: Token): { start: Position; end: Position } {
-		return { start: token.start, end: token.end };
-	}
-
-	private parseNumericLiteral(): ASTNode {
-		const currentToken = this.advanceAndReturnIfTypeMatch(Tokens.NUMERIC_LITERAL)!;
-		return new ASTNode('NUMBER', [], { value: currentToken.value, position: this.getPositionFromToken(currentToken) });
-	}
-
-	private isOperator(token: Token): boolean {
-		return [
-			Tokens.ADD,
-			Tokens.SUBTRACT,
-			Tokens.ASTERISK,
-			Tokens.DIVIDE,
-			Tokens.MODULO,
-		].includes(token.type);
-	}
-
-	private getPrecedence(token: Token): number {
-		switch (token.type) {
-			case Tokens.EQUALS:
-				return 1;
-			case Tokens.OPEN_POINTY:
-			case Tokens.CLOSE_POINTY:
-				return 2;
-			case Tokens.ADD:
-			case Tokens.SUBTRACT:
-				return 3;
-			case Tokens.ASTERISK:
-			case Tokens.DIVIDE:
-			case Tokens.MODULO:
-				return 4;
-			default:
-				return 0;
+		const startPosition = this.currentPosition();
+		const identifier = this.peek()!.value;
+		this.consume(Tokens.IDENTIFIER);
+		if (this.match(Tokens.ASSIGN)) {
+			throw new Error('Not implemented yet!');
 		}
-	}
+		if (this.match(Tokens.OPEN_PAREN)) {
+			const argExpressions: Expression[] = [];
 
-	private parseExpression(minPrecedence = 0): ASTNode {
-		let left = this.parseNumericLiteral(); // Erstmal die Zahl holen
-
-		while (true) {
-			const opToken = this.peek();
-			if (!opToken || !this.isOperator(opToken)) break;
-
-			const precedence = this.getPrecedence(opToken);
-			if (precedence < minPrecedence) break;
-
-			this.advance(); // Den Operator konsumieren
-			const right = this.parseExpression(precedence + 1); // Rekursion für die rechte Seite
-
-			left = new ASTNode('BINARY_EXPRESSION', [left, right], {
-				operation: opToken.type,
-			});
+			if (this.peek()?.type !== Tokens.CLOSE_PAREN) {
+				do {
+					argExpressions.push(this.parseExpression());
+				} while (this.match(Tokens.COMMA));
+			}
+			this.consume(Tokens.CLOSE_PAREN);
+			this.consume(Tokens.SEMI);
+			// TODO: Extract EXPRESSION_STATEMENT into own parser
+			return {
+				type: 'EXPRESSION_STATEMENT',
+				data: {
+					expression: {
+						type: 'FUNCTION_CALL',
+						data: { functionName: identifier, arguments: argExpressions },
+						position: startPosition,
+					},
+				},
+				position: startPosition,
+			};
 		}
 
-		return left;
+		throw new Error(`Found unused IDENTIFIER at ${this.positionString()}.`);
 	}
 
-	public parseToken(token: Token): ASTNode | undefined {
-		let returnValue: ASTNode | undefined = undefined;
-		switch (token.type) {
-			case Tokens.NUMERIC_LITERAL:
-				returnValue = this.parseExpression();
-				this.addToCurrentScope(returnValue);
-				break;
-			case Tokens.FUNCTION:
-				returnValue = this.parseFunctionSignature();
-				break;
-			case Tokens.CLOSE_CURLY:
-				const closedScope = this.scopeStack.pop();
-
-				if (closedScope?.type === Tokens.FUNCTION) {
-				}
-				this.advance();
-				returnValue = undefined;
-				break;
-			case Tokens.STRING_LITERAL:
-				returnValue = this.parseStringLiteral();
-				break;
+	private parseLocalStatement(): Statement {
+		switch (this.peek()?.type) {
 			case Tokens.IDENTIFIER:
-				const identifier = this.parseIdentifier();
-				this.addToCurrentScope(identifier);
-				returnValue = identifier;
-				break;
-			case Tokens.EOF:
-				if (this.scopeStack.length !== 0) {
-					throw new Error('Unexpected end of file.');
-				}
-				returnValue = new ASTNode('EOF', []);
-				break;
+				return this.parseIdentifier();
 			default:
 				throw new Error(
-					`Unexpected token type ${token.type} at position ${JSON.stringify(token.start)}`
+					`Unexpected token ${this.peek()?.type} for a statement at ${this.positionString()}`
 				);
 		}
-
-		return returnValue;
 	}
 
-	public parse(): ASTNode[] {
-		while (this.index < this.tokens.length) {
-			const node = this.parseToken(this.tokens[this.index]);
-
-			if (node?.type === 'EOF') {
-				return this.ast;
-			}
+	private parseTopLevelStatement(): Statement {
+		switch (this.peek()?.type) {
+			case Tokens.FUNCTION:
+				return this.parseFunction();
+			default:
+				throw new Error(
+					`Token ${this.peek()?.type} is not allowed at top level at ${this.positionString()}`
+				);
 		}
-		throw new Error('Unexpected end of file, did not encounter Token EOF');
+	}
+
+	public parse(): Statement[] {
+		let next: Token | undefined;
+		while ((next = this.peek()) !== undefined && next.type !== Tokens.EOF) {
+			const statement = this.parseTopLevelStatement();
+
+			this.ast.push(statement);
+		}
+
+		if (this.peek()?.type !== Tokens.EOF) {
+			throw new Error(
+				'Unexpected end of file during parsing, can not complete parsing.'
+			);
+		}
+
+		return this.ast;
+	}
+
+	// ---------------- Helpers ------------------
+	private positionString(): string {
+		const currentToken = this.peek();
+		if (currentToken === undefined) {
+			return '';
+		}
+
+		return `line ${currentToken.start.line}:${currentToken.start.column}`;
+	}
+
+	private currentPosition(): Position {
+		const currentToken = this.peek();
+
+		if (currentToken === undefined) {
+			throw new Error(
+				'Could not get position for because no token is present.'
+			);
+		}
+
+		return currentToken.start;
 	}
 }
 
-export { Parser, ASTNode };
+export { Parser };
