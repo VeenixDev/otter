@@ -7,6 +7,7 @@ type Expression =
 			position: Position;
 	  }
 	| { type: 'STRING_LITERAL'; data: { value: string }; position: Position }
+	| { type: 'NUMERIC_LITERAL'; data: { value: number }; position: Position }
 	| {
 			type: 'FUNCTION_CALL';
 			data: { arguments: Expression[]; functionName: string };
@@ -48,6 +49,11 @@ type Statement =
 	| {
 			type: 'EXPRESSION_STATEMENT';
 			data: { expression: Expression };
+			position: Position;
+	  }
+	| {
+			type: 'RETURN';
+			data: { value: Expression };
 			position: Position;
 	  };
 
@@ -122,11 +128,83 @@ class Parser {
 		switch (this.peek()?.type) {
 			case Tokens.STRING_LITERAL:
 				return this.parseStringLiteral();
+			case Tokens.NUMERIC_LITERAL:
+				return this.parseNumericExpression();
 			default:
 				throw new Error(
 					`Unexpected token ${this.peek()?.type} for expression at ${this.positionString()}`
 				);
 		}
+	}
+
+	private isOperator(token: Token): boolean {
+		return [
+			Tokens.ADD,
+			Tokens.SUBTRACT,
+			Tokens.ASTERISK,
+			Tokens.DIVIDE,
+			Tokens.MODULO,
+		].includes(token.type);
+	}
+
+	private getPrecedence(token: Token): number {
+		switch (token.type) {
+			case Tokens.EQUALS:
+				return 1;
+			case Tokens.OPEN_POINTY:
+			case Tokens.CLOSE_POINTY:
+				return 2;
+			case Tokens.ADD:
+			case Tokens.SUBTRACT:
+				return 3;
+			case Tokens.ASTERISK:
+			case Tokens.DIVIDE:
+			case Tokens.MODULO:
+				return 4;
+			default:
+				return 0;
+		}
+	}
+
+	private parseNumericLiteral(): Expression {
+		if (this.peek()?.type !== Tokens.NUMERIC_LITERAL) {
+			throw new Error(
+				`Expected string literal at ${this.positionString()} but got ${this.peek()?.type}`
+			);
+		}
+		const expression: Expression = {
+			type: 'NUMERIC_LITERAL',
+			data: {
+				value: Number(this.peek()!.value),
+			},
+			position: this.currentPosition(),
+		};
+		this.consume(Tokens.NUMERIC_LITERAL);
+		return expression;
+	}
+
+	private parseNumericExpression(minPrecedence = 0): Expression {
+		let left = this.parseNumericLiteral(); // Erstmal die Zahl holen
+
+		while (true) {
+			const opToken = this.peek();
+			if (!opToken || !this.isOperator(opToken)) break;
+
+			const precedence = this.getPrecedence(opToken);
+			if (precedence < minPrecedence) break;
+
+			this.consume(opToken.type); // Den Operator konsumieren
+			const right = this.parseNumericExpression(precedence + 1); // Rekursion für die rechte Seite
+
+
+			left = {
+				type: 'BINARY_EXPRESSION',
+				data: { left, right, operator: opToken.value },
+				position: this.currentPosition()
+			}
+		}
+
+		return left;
 	}
 
 	private parseBlock(): Statement {
@@ -173,6 +251,7 @@ class Parser {
 			);
 		}
 		const typeName = this.peek()!.value;
+		// TODO: Allow for recursive Types e.g. *(*u8[])[]
 		this.consume(Tokens.IDENTIFIER);
 		const hasGeneric = this.match(Tokens.OPEN_POINTY);
 		let genericType: Type | null = null;
@@ -272,6 +351,11 @@ class Parser {
 		switch (this.peek()?.type) {
 			case Tokens.IDENTIFIER:
 				return this.parseIdentifier();
+			case Tokens.RETURN:
+				this.consume(Tokens.RETURN);
+				const expression = this.parseExpression();
+				this.consume(Tokens.SEMI);
+				return {type: 'RETURN', data: { value: expression }, position: this.currentPosition() };
 			default:
 				throw new Error(
 					`Unexpected token ${this.peek()?.type} for a statement at ${this.positionString()}`
@@ -331,3 +415,4 @@ class Parser {
 }
 
 export { Parser };
+export type { Type, Argument, Statement, Expression };
