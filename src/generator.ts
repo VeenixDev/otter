@@ -48,8 +48,23 @@ class LLVMGenerator {
 		switch (node.typeName) {
 			case 'string':
 				return 'ptr';
-			default:
+			case 'bool':
+				return 'i1';
+			case 'i8':
+			case 'i16':
+			case 'i32':
+			case 'i64':
 				return node.typeName;
+			case 'u8':
+			case 'u16':
+			case 'u32':
+			case 'u64':
+				return `i${node.typeName.substring(1)}`;
+			case 'f32':
+			case 'f64':
+				return node.typeName;
+			default:
+				throw new Error(`Can not map type "${node.typeName}" into LLVM types.`);
 		}
 	}
 
