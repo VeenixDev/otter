@@ -1,4 +1,5 @@
 import { Argument, Expression, Statement, Type } from './parser';
+import { CheckedStatement } from './checker';
 
 // TODO: Move unique name generation for references into Checker
 const getVarGenerator = () => {
@@ -27,11 +28,11 @@ const getVarGenerator = () => {
 };
 
 class LLVMGenerator {
-	private readonly ast: Statement[];
+	private readonly ast: CheckedStatement[];
 	private readonly globalAdditions: string[];
 	private readonly varGenerator: () => string;
 
-	constructor(ast: Statement[]) {
+	constructor(ast: CheckedStatement[]) {
 		this.ast = ast;
 		this.globalAdditions = [];
 		this.varGenerator = getVarGenerator();
@@ -63,6 +64,10 @@ class LLVMGenerator {
 			case 'f32':
 			case 'f64':
 				return node.typeName;
+			case 'usize':
+				return 'u64'; // TODO: return actual architecture word size
+			case 'isize':
+				return 'i64'; // TODO: return actual architecture word size
 			default:
 				throw new Error(`Can not map type "${node.typeName}" into LLVM types.`);
 		}

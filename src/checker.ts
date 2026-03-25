@@ -47,6 +47,7 @@ type CheckedExpression =
 				left: CheckedExpression;
 				right: CheckedExpression;
 				operator: string;
+				resultType: CheckedType;
 			};
 			position: Position;
 			name: string;
@@ -65,7 +66,11 @@ type CheckedExpression =
 	  }
 	| {
 			type: 'FUNCTION_CALL';
-			data: { arguments: CheckedExpression[]; functionName: string };
+			data: {
+				arguments: CheckedExpression[];
+				functionName: string;
+				resultType: CheckedType;
+			};
 			position: Position;
 	  };
 
@@ -180,13 +185,98 @@ class Checker {
 	}
 
 	private checkExpression(expression: Expression): CheckedExpression {
-		throw new Error('Not implemented (checker.ts#checkExpression)')
+		switch (expression.type) {
+			case 'FUNCTION_CALL':
+				// TODO: Adjust to create Checker-Frame when function is not found to resume checking later.
+				const functionSymbol = this.functionTable.get(
+					expression.data.functionName
+				);
+
+				if (!functionSymbol) {
+					throw new Error(
+						`Can not verify call of unknown function "${expression.data.functionName}", please make sure this function is included in the build.`
+					);
+				}
+
+				if (
+					expression.data.arguments.length !==
+					functionSymbol.data.arguments.length
+				) {
+					throw new Error(
+						`Invalid function call, got ${expression.data.arguments.length} arguments but expected ${functionSymbol.data.arguments.length}.`
+					);
+				}
+
+				const argumentsExpressions: CheckedExpression[] = [];
+
+				for (let i = 0; i < expression.data.arguments.length; i++) {
+					const symbolArgumentType = functionSymbol.data.arguments[i].type;
+					const callArgumentExpression = this.checkExpression(
+						expression.data.arguments[i]
+					);
+					const callArgumentType = this.getTypeFromExpression(
+						callArgumentExpression
+					);
+
+					if (symbolArgumentType !== callArgumentType) {
+						throw new Error(
+							`Argument in call to function ${functionSymbol.name} at position ${this.positionToString(callArgumentExpression.position)}, expected "${this.typeToString(symbolArgumentType)}" but got "${this.typeToString(callArgumentType)}".`
+						);
+					}
+
+					argumentsExpressions.push(callArgumentExpression);
+				}
+
+				return {
+					type: 'FUNCTION_CALL',
+					data: {
+						arguments: argumentsExpressions,
+						functionName: functionSymbol.name,
+						resultType: functionSymbol.data.returnType,
+					},
+					position: expression.position,
+				};
+			default:
+				throw new Error(
+					`Checks for expression type "${expression.type}" are not supported yet.`
+				);
+		}
+	}
+
+	private getTypeFromExpression(expression: CheckedExpression): CheckedType {
+		if (expression.type === 'STRING_LITERAL') {
+			return {
+				typeName: 'String',
+				isPointer: true,
+				genericType: null,
+				isArray: true,
+				hasGeneric: false,
+				isPrimitive: false,
+			};
+		}
+		if (expression.type === 'NUMERIC_LITERAL') {
+			return {
+				typeName: 'i32', // TODO: Set correct numeric type
+				isPointer: false,
+				genericType: null,
+				isArray: false,
+				hasGeneric: false,
+				isPrimitive: true,
+			};
+		}
+
+		return expression.data.resultType;
 	}
 
 	private checkStatement(statement: Statement): CheckedStatement {
 		switch (statement.type) {
 			case 'FUNCTION':
 				const functionName = statement.data.name;
+				if (this.functionTable.has(functionName)) {
+					throw new Error(
+						`A function with this name "${functionName}" is already used.`
+					);
+				}
 				const functionArguments = statement.data.arguments.map((a) =>
 					this.checkArgument(a)
 				);
@@ -200,7 +290,7 @@ class Checker {
 					},
 				});
 
-				const functionBody = this.checkStatement(statement.data.body)
+				const functionBody = this.checkStatement(statement.data.body);
 
 				return {
 					type: 'FUNCTION',
@@ -209,43 +299,71 @@ class Checker {
 						name: functionName,
 						arguments: functionArguments,
 						returnType: functionReturnType,
-						body: functionBody
+						body: functionBody,
 					},
 					position: statement.position,
 				};
 			case 'BLOCK':
-				const blockBody = statement.data.body.map(b => this.checkStatement(b));
+				const blockBody = statement.data.body.map((b) =>
+					this.checkStatement(b)
+				);
 
 				return {
 					type: 'BLOCK',
 					data: {
-						body: blockBody
+						body: blockBody,
 					},
 					position: statement.position,
-				}
+				};
 			case 'RETURN':
 				if (this.currentTopLevelStatement?.type !== 'FUNCTION') {
-					throw new Error('Unexpected error, found return outside of FUNCTION.');
+					throw new Error(
+						'Unexpected error, found return outside of FUNCTION.'
+					);
 				}
-				const currentFunction = this.getFunctionSymbol(this.currentTopLevelStatement.data.name);
+				const currentFunction = this.getFunctionSymbol(
+					this.currentTopLevelStatement.data.name
+				);
 
 				if (currentFunction === undefined) {
-					throw new Error('Unexpected error, found return but no symbol for the function it is inside.');
+					throw new Error(
+						'Unexpected error, found return but no symbol for the function it is inside.'
+					);
 				}
 
+				const value = this.checkExpression(statement.data.value);
+				const valueType = this.getTypeFromExpression(value);
+
+				if (currentFunction.data.returnType !== valueType) {
+					throw new Error(
+						`Expected "${this.typeToString(currentFunction.data.returnType)}" but found "${this.typeToString(valueType)}" at ${this.positionToString(statement.position)}`
+					);
+				}
 				return {
 					type: 'RETURN',
 					data: {
-						value: this.checkExpression(statement.data.value),
+						value,
 						returnType: currentFunction.data.returnType,
 					},
 					position: statement.position,
-				}
+				};
 			default:
 				throw new Error(
 					`Checks for statement type "${statement.type}" are not supported yet.`
 				);
 		}
+	}
+
+	private typeToString(type: CheckedType): string {
+		if (type.hasGeneric) {
+			return `${type.isPointer ? '*' : ''}${type.typeName}<${type.genericType}>${type.isArray ? '[]' : ''}`;
+		} else {
+			return `${type.isPointer ? '*' : ''}${type.typeName}${type.isArray ? '[]' : ''}`;
+		}
+	}
+
+	private positionToString(position: Position): string {
+		return `L${position.line}:${position.column}`;
 	}
 
 	public checkStatements(): CheckedStatement[] {
@@ -260,3 +378,11 @@ class Checker {
 		return this.checkedAst;
 	}
 }
+
+export {
+	Checker,
+	CheckedStatement,
+	CheckedExpression,
+	CheckedType,
+	CheckedArgument,
+};
