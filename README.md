@@ -2,6 +2,10 @@
 
 This is the main source code repository for the Otter lang. Currently, all of this is still very much work in progress and the language is not ready to compile any real programs.
 
+## Papers
+
+- [Foundational Paper](docs/foundational_paper.pdf)
+
 ## What is the goal?
 
 The goal of Otter lang is to have a close to the system language, which prioritizes supporting the developer and to not restrict the developer. This should be achieved through a set of non-restrictive check done by the compiler to ensure memory safety is guaranteed and common problems are prevented.
