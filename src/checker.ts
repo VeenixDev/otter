@@ -141,7 +141,7 @@ class Checker {
 					{
 						name: 'text',
 						type: {
-							typeName: 'string',
+							typeName: 'String',
 							isPointer: true,
 							isPrimitive: false,
 							genericType: null,
@@ -160,6 +160,7 @@ class Checker {
 				},
 			},
 		});
+		this.functionTable.set('printf', this.functionTable.get('puts')!);
 	}
 
 	private getFunctionSymbol(functionName: string): FunctionSymbol | undefined {
@@ -182,6 +183,35 @@ class Checker {
 			typeName: type.typeName,
 			isPrimitive: type.isPrimitive,
 		};
+	}
+
+	private checkExpressionStatement(statement: Statement): CheckedStatement {
+		if (statement.type !== 'EXPRESSION_STATEMENT') {
+			throw new Error(
+				`Expected expression statement but got statement of type "${statement.type}"`
+			);
+		}
+
+		const expression = this.checkExpression(statement.data.expression);
+
+		return {
+			type: 'EXPRESSION_STATEMENT',
+			position: statement.position,
+			data: { expression },
+		};
+	}
+
+	private compareTypes(t1: CheckedType, t2: CheckedType): boolean {
+		if (t1.hasGeneric && t1.hasGeneric === t2.hasGeneric) {
+			return this.compareTypes(t1.genericType!, t2.genericType!);
+		}
+
+		return (
+			t1.isPrimitive === t2.isPrimitive &&
+			t1.isArray === t2.isArray &&
+			t1.isPointer === t2.isPointer &&
+			t1.typeName === t2.typeName
+		);
 	}
 
 	private checkExpression(expression: Expression): CheckedExpression {
@@ -218,7 +248,7 @@ class Checker {
 						callArgumentExpression
 					);
 
-					if (symbolArgumentType !== callArgumentType) {
+					if (!this.compareTypes(symbolArgumentType, callArgumentType)) {
 						throw new Error(
 							`Argument in call to function ${functionSymbol.name} at position ${this.positionToString(callArgumentExpression.position)}, expected "${this.typeToString(symbolArgumentType)}" but got "${this.typeToString(callArgumentType)}".`
 						);
@@ -236,6 +266,25 @@ class Checker {
 					},
 					position: expression.position,
 				};
+			case 'STRING_LITERAL':
+				return {
+					type: 'STRING_LITERAL',
+					data: {
+						value: expression.data.value,
+					},
+					position: expression.position,
+					name: this.varNameGen(),
+				};
+			case 'NUMERIC_LITERAL': {
+				return {
+					type: 'NUMERIC_LITERAL',
+					data: {
+						value: expression.data.value,
+					},
+					position: expression.position,
+					name: this.varNameGen(),
+				}
+			}
 			default:
 				throw new Error(
 					`Checks for expression type "${expression.type}" are not supported yet.`
@@ -249,7 +298,7 @@ class Checker {
 				typeName: 'String',
 				isPointer: true,
 				genericType: null,
-				isArray: true,
+				isArray: false,
 				hasGeneric: false,
 				isPrimitive: false,
 			};
@@ -268,85 +317,110 @@ class Checker {
 		return expression.data.resultType;
 	}
 
+	private checkFunction(statement: Statement): CheckedStatement {
+		if (statement.type !== 'FUNCTION') {
+			throw new Error(
+				`Expected a function but got statement of type "${statement.type}"`
+			);
+		}
+		const functionName = statement.data.name;
+		if (this.functionTable.has(functionName)) {
+			throw new Error(
+				`A function with this name "${functionName}" is already used.`
+			);
+		}
+		const functionArguments = statement.data.arguments.map((a) =>
+			this.checkArgument(a)
+		);
+		const functionReturnType = this.checkType(statement.data.returnType);
+
+		this.functionTable.set(functionName, {
+			name: functionName,
+			data: {
+				arguments: functionArguments,
+				returnType: functionReturnType,
+			},
+		});
+
+		const functionBody = this.checkStatement(statement.data.body);
+
+		return {
+			type: 'FUNCTION',
+			name: functionName,
+			data: {
+				name: functionName,
+				arguments: functionArguments,
+				returnType: functionReturnType,
+				body: functionBody,
+			},
+			position: statement.position,
+		};
+	}
+
+	private checkBody(statement: Statement): CheckedStatement {
+		if (statement.type !== 'BLOCK') {
+			throw new Error(
+				`Expected a block but got statement of type "${statement.type}"`
+			);
+		}
+		const blockBody = statement.data.body.map((b) => this.checkStatement(b));
+
+		return {
+			type: 'BLOCK',
+			data: {
+				body: blockBody,
+			},
+			position: statement.position,
+		};
+	}
+
+	private checkReturn(statement: Statement): CheckedStatement {
+		if (statement.type !== 'RETURN') {
+			throw new Error(
+				`Expected a return but got statement of type "${statement.type}"`
+			);
+		}
+		if (this.currentTopLevelStatement?.type !== 'FUNCTION') {
+			throw new Error('Unexpected error, found return outside of FUNCTION.');
+		}
+		const currentFunction = this.getFunctionSymbol(
+			this.currentTopLevelStatement.data.name
+		);
+
+		if (currentFunction === undefined) {
+			throw new Error(
+				'Unexpected error, found return but no symbol for the function it is inside.'
+			);
+		}
+
+		const value = this.checkExpression(statement.data.value);
+		const valueType = this.getTypeFromExpression(value);
+
+		if (!this.compareTypes(currentFunction.data.returnType, valueType)) {
+			throw new Error(
+				`Expected "${this.typeToString(currentFunction.data.returnType)}" but found "${this.typeToString(valueType)}" at ${this.positionToString(statement.position)}`
+			);
+		}
+		return {
+			type: 'RETURN',
+			data: {
+				value,
+				returnType: currentFunction.data.returnType,
+			},
+			position: statement.position,
+		};
+	}
+
 	private checkStatement(statement: Statement): CheckedStatement {
 		switch (statement.type) {
 			case 'FUNCTION':
-				const functionName = statement.data.name;
-				if (this.functionTable.has(functionName)) {
-					throw new Error(
-						`A function with this name "${functionName}" is already used.`
-					);
-				}
-				const functionArguments = statement.data.arguments.map((a) =>
-					this.checkArgument(a)
-				);
-				const functionReturnType = this.checkType(statement.data.returnType);
-
-				this.functionTable.set(functionName, {
-					name: functionName,
-					data: {
-						arguments: functionArguments,
-						returnType: functionReturnType,
-					},
-				});
-
-				const functionBody = this.checkStatement(statement.data.body);
-
-				return {
-					type: 'FUNCTION',
-					name: functionName,
-					data: {
-						name: functionName,
-						arguments: functionArguments,
-						returnType: functionReturnType,
-						body: functionBody,
-					},
-					position: statement.position,
-				};
+				return this.checkFunction(statement);
 			case 'BLOCK':
-				const blockBody = statement.data.body.map((b) =>
-					this.checkStatement(b)
-				);
-
-				return {
-					type: 'BLOCK',
-					data: {
-						body: blockBody,
-					},
-					position: statement.position,
-				};
+				return this.checkBody(statement);
 			case 'RETURN':
-				if (this.currentTopLevelStatement?.type !== 'FUNCTION') {
-					throw new Error(
-						'Unexpected error, found return outside of FUNCTION.'
-					);
-				}
-				const currentFunction = this.getFunctionSymbol(
-					this.currentTopLevelStatement.data.name
-				);
-
-				if (currentFunction === undefined) {
-					throw new Error(
-						'Unexpected error, found return but no symbol for the function it is inside.'
-					);
-				}
-
-				const value = this.checkExpression(statement.data.value);
-				const valueType = this.getTypeFromExpression(value);
-
-				if (currentFunction.data.returnType !== valueType) {
-					throw new Error(
-						`Expected "${this.typeToString(currentFunction.data.returnType)}" but found "${this.typeToString(valueType)}" at ${this.positionToString(statement.position)}`
-					);
-				}
-				return {
-					type: 'RETURN',
-					data: {
-						value,
-						returnType: currentFunction.data.returnType,
-					},
-					position: statement.position,
-				};
+				return this.checkReturn(statement);
+			case 'EXPRESSION_STATEMENT':
+				return this.checkExpressionStatement(statement);
 			default:
 				throw new Error(
 					`Checks for statement type "${statement.type}" are not supported yet.`

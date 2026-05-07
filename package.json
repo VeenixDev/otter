@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "dev": "ts-node src/index.ts",
-    "compile": "ts-node src/index.ts && clang out/output.ll -o out/output"
+    "compile": "ts-node src/index.ts && clang out/output.ll -o out/output",
+		"compile-and-run": "npm run compile && echo \"---===+ Running generated binary +===---\" &&./out/output"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

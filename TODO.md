@@ -2,14 +2,13 @@
 
 ## Now
 
-- Add "usize" and "isize" to lexer and parser.
-- Adjust LLVM generator to use checkerResult
-  - Add Checker to compilation pipeline
+- Extend checker and parser to support expressions better
+- Extend checker and parser
 
 ## Next
 
-- Extend checker and parser to support expressions better
-- Extend checker and parser
+- Complete syntax and semantic skeleton
+- Add basic checks
 
 ## Later
 

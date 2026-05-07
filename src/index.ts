@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { Lexer } from './lexer';
 import { Parser } from './parser';
 import { LLVMGenerator } from './generator';
+import { Checker } from './checker';
 
 const file = fs.readFileSync('examples/hello_world.otter', 'utf8');
 
@@ -34,10 +35,17 @@ fs.writeFileSync('out/ast.json', JSON.stringify(ast, null, 2));
 
 console.info('Completed Parser result can be found in "ast.json"');
 
-console.warn('Skipping LLVM generation, because the generator is not yet compatible with the new AST-structure.');
+console.info('Starting Checker');
+const checker = new Checker(ast);
+
+const checkedAst = checker.checkStatements();
+
+fs.writeFileSync('out/checkedAst.json', JSON.stringify(checkedAst, null, 2));
+
+console.info('Completed Checker result can be found in "checkedAst.json"');
 console.info('Starting LLVM Generator');
 
-const generator = new LLVMGenerator(ast);
+const generator = new LLVMGenerator(checkedAst);
 
 const output = generator.generate();
 

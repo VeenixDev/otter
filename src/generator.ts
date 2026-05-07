@@ -1,41 +1,12 @@
-import { Argument, Expression, Statement, Type } from './parser';
-import { CheckedStatement } from './checker';
-
-// TODO: Move unique name generation for references into Checker
-const getVarGenerator = () => {
-	// prettier-ignore
-	const viableSymbols = Object.freeze([
-        'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o',
-        'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D',
-        'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S',
-        'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
-    ]);
-	let counter = 0;
-	const base = viableSymbols.length;
-
-	return () => {
-		let n = counter + 1;
-		let varName = '';
-		while (n > 0) {
-			n--;
-			const digit = viableSymbols[n % base];
-			varName = digit + varName;
-			n = Math.floor(n / base);
-		}
-		counter++;
-		return varName;
-	};
-};
+import { CheckedExpression, CheckedArgument, CheckedStatement, CheckedType } from './checker';
 
 class LLVMGenerator {
 	private readonly ast: CheckedStatement[];
 	private readonly globalAdditions: string[];
-	private readonly varGenerator: () => string;
 
 	constructor(ast: CheckedStatement[]) {
 		this.ast = ast;
 		this.globalAdditions = [];
-		this.varGenerator = getVarGenerator();
 		this.loadGlobalAdditions();
 	}
 
@@ -44,10 +15,10 @@ class LLVMGenerator {
 		this.globalAdditions.push('declare i32 @puts(ptr)');
 	}
 
-	private generateType(node: Type): string {
+	private generateType(node: CheckedType): string {
 		// TODO: Implement actual type mapping
 		switch (node.typeName) {
-			case 'string':
+			case 'String':
 				return 'ptr';
 			case 'bool':
 				return 'i1';
@@ -73,29 +44,26 @@ class LLVMGenerator {
 		}
 	}
 
-	private generateArgument(arg: Argument): string {
+	private generateArgument(arg: CheckedArgument): string {
 		return `${this.generateType(arg.type)} %${arg.name}`;
 	}
 
-	private generateExpression(node: Expression): string {
+	private generateExpression(node: CheckedExpression): string {
 		switch (node.type) {
 			case 'STRING_LITERAL':
-				const strVarName = this.varGenerator();
-				this.globalAdditions.push(`@${strVarName} = constant [${node.data.value.length + 1} x i8] c"${node.data.value}\\00"`);
-				return `ptr @${strVarName}`;
+				this.globalAdditions.push(
+					`@${node.name} = constant [${node.data.value.length + 1} x i8] c"${node.data.value}\\00"`
+				);
+				return `ptr @${node.name}`;
 			case 'FUNCTION_CALL':
-				// TODO: 1. Create Function table for return type lookup
-				// TODO: 2. Implement Checker to enrich Expression information
-				if (node.data.functionName === 'printf') {
-					return `call i32 @puts(${node.data.arguments.map(a => this.generateExpression(a)).join(", ")})`;
-				} else {
-					throw new Error('Unknown function');
-				}
+				return `call ${this.generateType(node.data.resultType)} @${node.data.functionName}(${node.data.arguments.map((a) => this.generateExpression(a)).join(', ')})`;
 			case 'NUMERIC_LITERAL':
 				// TODO: Get type from Checker
 				return `i32 ${node.data.value}`;
 			case 'BINARY_EXPRESSION':
-				throw new Error('LLVM Generator: Binary Expressions are not yet implemented.')
+				throw new Error(
+					'LLVM Generator: Binary Expressions are not yet implemented.'
+				);
 			default:
 				throw new Error(
 					`LLVM Generator: Unexpected type for expression.` // I would really like to add the wrong type but TypeScript doesn't let me without complaining.
@@ -103,15 +71,15 @@ class LLVMGenerator {
 		}
 	}
 
-	private generateBlock(node: Statement): string {
+	private generateBlock(node: CheckedStatement): string {
 		if (node.type !== 'BLOCK') {
 			throw new Error(`LLVM Generator: Expected a block, got ${node.type}.`);
 		}
 
-		return `{\n${node.data.body.map(s => this.generateStatement(s)).join('\n')}\n}`;
+		return `{\n${node.data.body.map((s) => this.generateStatement(s)).join('\n')}\n}`;
 	}
 
-	private generateStatement(node: Statement): string {
+	private generateStatement(node: CheckedStatement): string {
 		switch (node.type) {
 			case 'FUNCTION':
 				const functionIdentifier = node.data.name;
@@ -121,9 +89,7 @@ class LLVMGenerator {
 			case 'EXPRESSION_STATEMENT':
 				return this.generateExpression(node.data.expression);
 			case 'RETURN':
-				// TODO: 1. Get Return type from current function
-				// TODO: 2. Get Return type from Checker
-				return `ret ${this.generateExpression(node.data.value)}`
+				return `ret ${this.generateExpression(node.data.value)}`;
 			default:
 				throw new Error(
 					`LLVM Generator: Unexpected type ${node.type} for statement.`

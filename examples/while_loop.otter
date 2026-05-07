@@ -1,0 +1,11 @@
+function main(argc: i32, argv: *String[]): i32 {
+    const counter: isize = 10;
+    let i: isize = 0;
+
+    while(i < counter) {
+        printf("Iteration...");
+        i += 1;
+    }
+
+    return 0;
+}

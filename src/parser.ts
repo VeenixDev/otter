@@ -74,6 +74,8 @@ class Parser {
 		'f32',
 		'f64',
 		'bool',
+		'isize',
+		'usize'
 	]);
 
 	constructor(tokens: Token[]) {
