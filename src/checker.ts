@@ -50,8 +50,15 @@ type CheckedExpression =
 				resultType: CheckedType;
 			};
 			position: Position;
-			name: string;
 	  }
+	| {
+			type: 'VARIABLE',
+			data: {
+				varName: string;
+				type: CheckedType;
+			}
+			position: Position;
+		}
 	| {
 			type: 'STRING_LITERAL';
 			data: { value: string };
@@ -92,8 +99,24 @@ type CheckedStatement =
 			name: string;
 	  }
 	| {
+			type: 'WHILE';
+			data: {
+				condition: CheckedExpression;
+				body: CheckedStatement;
+			}
+			position: Position;
+		}
+	| {
+	type: 'ASSIGN',
+	data: {
+		variableName: string;
+		newValue: CheckedExpression;
+	},
+	position: Position
+}
+	| {
 			type: 'VAR_DECL';
-			data: { name: string; type: CheckedType; value: CheckedExpression };
+			data: { name: string; type: CheckedType; value: CheckedExpression, isConstant: boolean };
 			position: Position;
 			name: string;
 	  }
@@ -117,17 +140,26 @@ type FunctionSymbol = {
 	};
 };
 
+type VariableSymbol = {
+	name: string;
+	data: {
+		type: CheckedType;
+	}
+}
+
 class Checker {
 	private readonly ast: Statement[];
 	private checkedAst: CheckedStatement[];
 	private varNameGen = getVarGenerator();
 	private functionTable: Map<string, FunctionSymbol>;
+	private variablesTable: Map<string, VariableSymbol>;
 	private currentTopLevelStatement: Statement | undefined;
 
 	constructor(ast: Statement[]) {
 		this.ast = ast;
 		this.checkedAst = [];
 		this.functionTable = new Map<string, FunctionSymbol>();
+		this.variablesTable = new Map<string, VariableSymbol>();
 		this.currentTopLevelStatement = undefined;
 
 		this.initFunctionTable();
@@ -275,7 +307,7 @@ class Checker {
 					position: expression.position,
 					name: this.varNameGen(),
 				};
-			case 'NUMERIC_LITERAL': {
+			case 'NUMERIC_LITERAL':
 				return {
 					type: 'NUMERIC_LITERAL',
 					data: {
@@ -284,9 +316,30 @@ class Checker {
 					position: expression.position,
 					name: this.varNameGen(),
 				}
-			}
+			case 'BINARY_EXPRESSION':
+				const checkedLeft = this.checkExpression(expression.data.left);
+				return {
+					type: 'BINARY_EXPRESSION',
+					data: {
+						left: checkedLeft,
+						right: this.checkExpression(expression.data.right),
+						operator: expression.data.operator,
+						resultType: this.getTypeFromExpression(checkedLeft)
+					},
+					position: expression.position
+				}
+			case 'VARIABLE':
+				return {
+					type: 'VARIABLE',
+					data: {
+						varName: expression.data.varName,
+						type: this.variablesTable.get(expression.data.varName)!.data.type
+					},
+					position: expression.position
+				}
 			default:
 				throw new Error(
+					// @ts-expect-error
 					`Checks for expression type "${expression.type}" are not supported yet.`
 				);
 		}
@@ -312,6 +365,10 @@ class Checker {
 				hasGeneric: false,
 				isPrimitive: true,
 			};
+		}
+
+		if (expression.type === 'VARIABLE')  {
+			return expression.data.type;
 		}
 
 		return expression.data.resultType;
@@ -421,11 +478,92 @@ class Checker {
 				return this.checkReturn(statement);
 			case 'EXPRESSION_STATEMENT':
 				return this.checkExpressionStatement(statement);
+			case 'VAR_DECL':
+				return this.checkVarDeclaration(statement);
+			case 'WHILE':
+				return this.checkWhile(statement);
+			case 'ASSIGN':
+				return this.checkAssign(statement);
 			default:
 				throw new Error(
 					`Checks for statement type "${statement.type}" are not supported yet.`
 				);
 		}
+	}
+
+	private checkAssign(statement: Statement): CheckedStatement {
+		if (statement.type !== 'ASSIGN') {
+			throw new Error(
+				`Expected a assign but got statement of type "${statement.type}"`
+			);
+		}
+
+		const variableSymbol = this.variablesTable.get(statement.data.varName);
+		if (!variableSymbol) {
+			throw new Error(`Variable "${statement.data.varName}" does not exist and cannot be assigned.`);
+		}
+
+		const newValueExpression = this.checkExpression(statement.data.newValue);
+		const newValueExpressionType = this.getTypeFromExpression(newValueExpression);
+
+		if (!this.compareTypes(variableSymbol.data.type, newValueExpressionType)) {
+			throw new Error(`Type ${this.typeToString(newValueExpressionType)} is not assignable to variable "${statement.data.varName}" with tye ${this.typeToString(variableSymbol.data.type)}.`);
+		}
+
+		return {
+			type: 'ASSIGN',
+			data: {
+				variableName: statement.data.varName,
+				newValue: newValueExpression
+			},
+			position: statement.position
+		}
+	}
+
+	private checkWhile(statement: Statement): CheckedStatement {
+		if (statement.type !== 'WHILE') {
+			throw new Error(
+				`Expected a while but got statement of type "${statement.type}"`
+			);
+		}
+
+		return {
+			type: 'WHILE',
+			data: {
+				condition: this.checkExpression(statement.data.condition),
+				body: this.checkStatement(statement.data.body)
+			},
+			position: statement.position,
+		}
+	}
+
+	private checkVarDeclaration(statement: Statement): CheckedStatement {
+		if (statement.type !== 'VAR_DECL') {
+			throw new Error(
+				`Expected a variable declaration but got statement of type "${statement.type}"`
+			);
+		}
+
+		if (this.variablesTable.has(statement.data.name)) {
+			throw new Error(`Duplicate variable name "${statement.data.name}".`);
+		}
+		this.variablesTable.set(statement.data.name, {
+			name: statement.data.name,
+			data: {
+				type: this.checkType(statement.data.type)
+			}
+		})
+		return {
+			type: 'VAR_DECL',
+			position: statement.position,
+			data: {
+				name: statement.data.name,
+				type: statement.data.type,
+				value: this.checkExpression(statement.data.value),
+				isConstant: statement.data.isConstant,
+			},
+			name: this.varNameGen(),
+		};
 	}
 
 	private typeToString(type: CheckedType): string {

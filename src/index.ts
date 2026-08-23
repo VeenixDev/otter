@@ -4,7 +4,7 @@ import { Parser } from './parser';
 import { LLVMGenerator } from './generator';
 import { Checker } from './checker';
 
-const file = fs.readFileSync('examples/hello_world.otter', 'utf8');
+const file = fs.readFileSync('examples/while_loop.otter', 'utf8');
 
 if (!file) {
 	throw new Error('Could not find file');

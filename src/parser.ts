@@ -8,6 +8,7 @@ type Expression =
 	  }
 	| { type: 'STRING_LITERAL'; data: { value: string }; position: Position }
 	| { type: 'NUMERIC_LITERAL'; data: { value: number }; position: Position }
+	| { type: 'VARIABLE'; data: { varName: string }; position: Position }
 	| {
 			type: 'FUNCTION_CALL';
 			data: { arguments: Expression[]; functionName: string };
@@ -41,8 +42,23 @@ type Statement =
 			position: Position;
 	  }
 	| {
+			type: 'WHILE';
+			data: { condition: Expression; body: Statement };
+			position: Position;
+	  }
+	| {
+	type: 'ASSIGN'
+	data: { varName: string; newValue: Expression };
+	position: Position;
+}
+	| {
 			type: 'VAR_DECL';
-			data: { name: string; type: Type; value: Expression };
+			data: {
+				name: string;
+				type: Type;
+				value: Expression;
+				isConstant: boolean;
+			};
 			position: Position;
 	  }
 	| { type: 'IMPORT'; data: { namespace: string }; position: Position }
@@ -75,7 +91,7 @@ class Parser {
 		'f64',
 		'bool',
 		'isize',
-		'usize'
+		'usize',
 	]);
 
 	constructor(tokens: Token[]) {
@@ -132,6 +148,8 @@ class Parser {
 				return this.parseStringLiteral();
 			case Tokens.NUMERIC_LITERAL:
 				return this.parseNumericExpression();
+			case Tokens.IDENTIFIER:
+				return this.parseIdentifierExpression();
 			default:
 				throw new Error(
 					`Unexpected token ${this.peek()?.type} for expression at ${this.positionString()}`
@@ -146,6 +164,13 @@ class Parser {
 			Tokens.ASTERISK,
 			Tokens.DIVIDE,
 			Tokens.MODULO,
+
+			Tokens.OPEN_POINTY,
+			Tokens.CLOSE_POINTY,
+			Tokens.EQUALS,
+			Tokens.EQUALS_OR_GREATER,
+			Tokens.EQUALS_OR_LESS,
+			Tokens.NOT_EQUALS,
 		].includes(token.type);
 	}
 
@@ -198,12 +223,11 @@ class Parser {
 			this.consume(opToken.type); // Den Operator konsumieren
 			const right = this.parseNumericExpression(precedence + 1); // Rekursion für die rechte Seite
 
-
 			left = {
 				type: 'BINARY_EXPRESSION',
 				data: { left, right, operator: opToken.value },
-				position: this.currentPosition()
-			}
+				position: this.currentPosition(),
+			};
 		}
 
 		return left;
@@ -310,6 +334,47 @@ class Parser {
 		};
 	}
 
+	private parseVariable(): Expression {
+		if (this.peek()?.type !== Tokens.IDENTIFIER) {
+			throw new Error(
+				`Expected identifier at position ${this.positionString()} but got ${this.peek()?.type}`
+			);
+		}
+
+		const startPosition = this.currentPosition();
+		const identifier = this.peek()!.value;
+		this.consume(Tokens.IDENTIFIER);
+
+		return {
+			type: 'VARIABLE',
+			data: { varName: identifier },
+			position: startPosition,
+		};
+	}
+
+	private parseIdentifierExpression(minPrecedence = 0): Expression {
+		let left = this.parseVariable();
+
+		while (true) {
+			const opToken = this.peek();
+			if (!opToken || !this.isOperator(opToken)) break;
+
+			const precedence = this.getPrecedence(opToken);
+			if (precedence < minPrecedence) break;
+
+			this.consume(opToken.type);
+			const right = this.parseIdentifierExpression(precedence + 1);
+
+			left = {
+				type: 'BINARY_EXPRESSION',
+				data: { left, right, operator: opToken.value },
+				position: this.currentPosition(),
+			};
+		}
+
+		return left;
+	}
+
 	private parseIdentifier(): Statement {
 		if (this.peek()?.type !== Tokens.IDENTIFIER) {
 			throw new Error(
@@ -321,6 +386,32 @@ class Parser {
 		this.consume(Tokens.IDENTIFIER);
 		if (this.match(Tokens.ASSIGN)) {
 			throw new Error('Not implemented yet!');
+		}
+		if (this.match(Tokens.ASSIGN_ADD)) {
+			const assignAddExpression = this.parseExpression();
+			this.consume(Tokens.SEMI);
+
+			// TODO: Make more beautiful
+			return {
+				type: 'ASSIGN',
+				data: {
+					varName: identifier,
+					newValue: {
+						type: 'BINARY_EXPRESSION',
+						data: {
+							left: {
+								type: 'VARIABLE',
+								data: { varName: identifier },
+								position: startPosition
+							},
+							right: assignAddExpression,
+							operator: '+'
+						},
+						position: startPosition
+					}
+				},
+				position: startPosition,
+			}
 		}
 		if (this.match(Tokens.OPEN_PAREN)) {
 			const argExpressions: Expression[] = [];
@@ -350,6 +441,7 @@ class Parser {
 	}
 
 	private parseLocalStatement(): Statement {
+		const startPosition = this.currentPosition();
 		switch (this.peek()?.type) {
 			case Tokens.IDENTIFIER:
 				return this.parseIdentifier();
@@ -357,7 +449,65 @@ class Parser {
 				this.consume(Tokens.RETURN);
 				const expression = this.parseExpression();
 				this.consume(Tokens.SEMI);
-				return {type: 'RETURN', data: { value: expression }, position: this.currentPosition() };
+				return {
+					type: 'RETURN',
+					data: { value: expression },
+					position: startPosition,
+				};
+			case Tokens.CONST:
+				this.consume(Tokens.CONST);
+				const constIdentifier = this.peek()!.value;
+				this.consume(Tokens.IDENTIFIER);
+				this.consume(Tokens.COLON);
+				const constType = this.parseType();
+				// this.consume(Tokens.IDENTIFIER)
+				this.consume(Tokens.ASSIGN);
+				const constValue = this.parseExpression();
+				this.consume(Tokens.SEMI);
+				return {
+					type: 'VAR_DECL',
+					position: startPosition,
+					data: {
+						name: constIdentifier,
+						type: constType,
+						value: constValue,
+						isConstant: true,
+					},
+				};
+			case Tokens.LET:
+				this.consume(Tokens.LET);
+				const letIdentifier = this.peek()!.value;
+				this.consume(Tokens.IDENTIFIER);
+				this.consume(Tokens.COLON);
+				const letType = this.parseType();
+				// this.consume(Tokens.IDENTIFIER)
+				this.consume(Tokens.ASSIGN);
+				const letValue = this.parseExpression();
+				this.consume(Tokens.SEMI);
+				return {
+					type: 'VAR_DECL',
+					position: startPosition,
+					data: {
+						name: letIdentifier,
+						type: letType,
+						value: letValue,
+						isConstant: false,
+					},
+				};
+			case Tokens.WHILE:
+				this.consume(Tokens.WHILE);
+				this.consume(Tokens.OPEN_PAREN);
+				const whileCondition = this.parseExpression();
+				this.consume(Tokens.CLOSE_PAREN);
+				const whileBlock = this.parseBlock();
+				return {
+					type: 'WHILE',
+					position: startPosition,
+					data: {
+						condition: whileCondition,
+						body: whileBlock,
+					},
+				};
 			default:
 				throw new Error(
 					`Unexpected token ${this.peek()?.type} for a statement at ${this.positionString()}`
