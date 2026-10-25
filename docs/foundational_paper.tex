@@ -16,105 +16,150 @@
 
 \begin{document}
 
-\maketitle
+    \maketitle
 
-\section{Abstract}
+    \section{Abstract}
 
-The modern low level software development is plagued by an inherent gap between implementation and formal verification. Manual audits are tedious and economically expensive, while current security mechanisms focus on only one problem, like "Memory Safety". In this paper, we present \textbf{Otter}, a unified formalism for the automated verification of arbitrary program logic.
+    The modern low level software development is plagued by an inherent gap between implementation and formal verification. Manual audits are tedious and economically expensive, while current security mechanisms focus on only one problem, like "Memory Safety". In this paper, we present \textbf{Otter}, a unified formalism for the automated verification of arbitrary program logic.
 
-The core of the system is the \textbf{Otter Abstract Machine (OAM)}, which represents the program state in a directed graph consisting of domains. The abstraction of the physical hardware limits to provable, finite resource limits allows the creation of \textbf{Otter Proof Archives (OPA)}. This artifact ensures a cryptographic verified prove for the absence of runtime errors, undefined behavior, and logical invariant validations. With this, Otter transforms the audit-process from a reactive, human examination to a proactive mathematical certainty. 
+    The core of the system is the \textbf{Otter Abstract Machine (OAM)}, which represents the program state in a directed graph consisting of domains. The abstraction of the physical hardware limits to provable, finite resource limits allows the creation of \textbf{Otter Proof Archives (OPA)}. This artifact ensures a cryptographic verified proof for the absence of runtime errors, undefined behavior, and logical invariant validations. With this, Otter transforms the audit-process from a reactive, human examination to a proactive mathematical certainty.
 
-\section{The Otter Abstract Machine (OAM)}
+    \section{The Otter Abstract Machine (OAM)}
 
-The OAM is defined as a triple $\mathcal{M}=(G,\Sigma,\delta)$, where:
+    The OAM is defined as a triple $\mathcal{M}=(G,\Sigma,\delta)$, where:
 
-\begin{itemize}
-    \item $G$ is the directed Property Graph representing all active domains and their relations.
-    \item $\Sigma$ is the Alphabet of Operations (Transitions).
-    \item $\delta$ is the Transition Function $\delta : G \times \Sigma \to G \cup \{ \bot \}$, where $\bot$ represents an unprovable (invalid) state.
-\end{itemize}
+    \begin{itemize}
+        \item $G$ is the directed Property Graph representing all active domains and their relations.
+        \item $\Sigma$ is the Alphabet of Operations (Transitions).
+        \item $\delta$ is the Transition Function $\delta : G \times \Sigma \to G \cup \{ \bot \}$, where $\bot$ represents an unprovable (invalid) state.
+    \end{itemize}
 
-For reasons of practicality the OAM abstracts away specific hardware constraints, like memory and time, to focus on computational decidability and logical integrity.  This means every prove has to be executable in a finite amount of time and use a finite amount of memory, not considering if the resulting hardware requirements are practical.
+    For reasons of practicality, the OAM abstracts away specific hardware constraints, like memory and time, to focus on computational decidability and logical integrity. This means that every proof has to be executable in a finite amount of time and use a finite amount of memory, not considering whether the resulting hardware requirements are practical.
 
-\section{Domain Definition \& Taxonomy}
+    \section{Domain Definition \& Taxonomy}
 
-In the OAM, a domain $\mathcal{D}$ is considered the smallest unit of logical verification. We differentiate, between four fundamental classes of domains.
+    In the OAM, a domain $\mathcal{D}$ is considered the smallest unit of logical verification. We differentiate, between four fundamental classes of domains.
 
-\subsection{Primitive Domain ($\mathcal{D}_{atomic}$)}
+    \subsection{Primitive Domain ($\mathcal{D}_{atomic}$)}
 
-This domain is a standard domain as defined in the Set Theory. It describes a set of scalar values $\mathbb{S}$.
+    This domain is a standard domain as defined in the Set Theory. It describes a set of scalar values $\mathbb{S}$.
 
-\begin{equation}
-    \mathcal{D}_{atomic}=\{v \mid v \in \mathbb{S} \land P(v)\}
-\end{equation}
+    \begin{equation}
+        \mathcal{D}_{atomic}=\{v \mid v \in \mathbb{S} \land P(v)\}
+    \end{equation}
 
-where $P$ is a predicate, for example an Interval $[0, 100]$ or disjunct values $\{2, 3, 5, 7\}$.
+    where $P$ is a predicate, for example an Interval $[0, 100]$ or disjunct values $\{2, 3, 5, 7\}$.
 
-\subsection{Ordered Domain ($\mathcal{D}_{ordered}$)}
+    \subsection{Ordered Domain ($\mathcal{D}_{ordered}$)}
 
-This type of domain is primarily used to describe complex data structures. The domain is defined as a tuple of $n$ domains.
+    This type of domain is primarily used to describe complex data structures. The domain is defined as a tuple of $n$ domains.
 
-\begin{equation}
-    \mathcal{D}_{ordered}=(\mathcal{D}_1,\mathcal{D}_2,...,\mathcal{D}_n)
-\end{equation}
+    \begin{equation}
+        \mathcal{D}_{ordered}=(\mathcal{D}_1,\mathcal{D}_2,...,\mathcal{D}_n)
+    \end{equation}
 
-Accessing a member $m_i$ of an ordered domain $\mathcal{D}_{ordered}$ yields the sub-domain $\mathcal{D}_i$ while maintaining the constraints of the parent domain.
+    Accessing a member $m_i$ of an ordered domain $\mathcal{D}_{ordered}$ yields the sub-domain $\mathcal{D}_i$ while maintaining the constraints of the parent domain.
 
-\subsection{Proxy Domain ($\mathcal{D}_{proxy}$)}
+    \subsection{Proxy Domain ($\mathcal{D}_{proxy}$)}
 
-This type of domain is used to model references to another domain $\mathcal{D}_{target}$. A $\mathcal{D}_{proxy}$ is a singleton set containing the unique identifier $\iota$ of a target domain $\mathcal{D}_{target}$ within the OAM state graph.
+    This type of domain is used to model references to another domain $\mathcal{D}_{target}$. A $\mathcal{D}_{proxy}$ is a singleton set containing the unique identifier $\iota$ of a target domain $\mathcal{D}_{target}$ within the OAM state graph.
 
-\begin{equation}
-    \mathcal{D}_{proxy}=G_{\iota}
-\end{equation}
+    \begin{equation}
+        \mathcal{D}_{proxy}=G_\iota
+    \end{equation}
 
-\subsection{Mapped Domain ($\mathcal{D}_{mapped}$)}
+    This domain is considered invalid when $\mathcal{D}_{target}$ successfully transitioned to $\mathcal{D}_\bot$.
 
-This is arguably the most complex type of domain used in the OAM, it can be considered similar to a dependent type. It is used to define the domain depending on a different domain. It is a set of ordered domains containing $D_{key}$ which describes the condition for this mapping and $D_{value}$ which describes the domain.
+    \subsection{Mapped Domain ($\mathcal{D}_{mapped}$)}
 
-\begin{equation}
-    \mathcal{D}_{mapped}=\{(\mathcal{D}_{key,i},\mathcal{D}_{value,i})\mid i\in I\}
-\end{equation}
+    This is arguably the most complex type of domain used in the OAM, it can be considered similar to a dependent type. It is used to define the domain depending on a different domain. It is a set of ordered domains containing $D_{key}$ which describes the condition for this mapping and $D_{value}$ which describes the domain.
 
-A transition into a mapped domain is only valid if the current state $s$ satisfies at least one $\mathcal{D}_{key,i}$, when more than one are satisfied only the intersection of the domains is accessible until further refinement. When more $\mathcal{D}_{key,i}$ are satisfied the resulting domain is defined as
+    \begin{equation}
+        \mathcal{D}_{mapped}=\{(\mathcal{D}_{key,i},\mathcal{D}_{value,i})\mid i\in I\}
+    \end{equation}
 
-\begin{equation}
-    \begin{split}
-        I(x)=\{i \in I \mid x \in \mathcal{D}_{key,i} \} \\
-        \mathcal{D}_{mapped}=\bigcap_{i \in I(x)}\mathcal{D}_{value,i}
-    \end{split}
-\end{equation}
+    A transition into a mapped domain is only valid if the current state $s$ satisfies at least one $\mathcal{D}_{key,i}$, when more than one are satisfied only the intersection of the domains is accessible until further refinement. When more $\mathcal{D}_{key,i}$ are satisfied the resulting domain is defined as
 
-\subsection{Invalid Domain}
+    \begin{equation}
+        \begin{split}
+            I(x)=\{i \in I \mid x \in \mathcal{D}_{key,i} \} \\
+            \mathcal{D}_{mapped}=\bigcap_{i \in I(x)}\mathcal{D}_{value,i}
+        \end{split}
+    \end{equation}
 
-A domain is considered invalid when the values it represents are no longer accessible or were destroyed. An invalid domain cannot be interacted with, if an access is tried this is considered to make this section unprovable and thus disproves the current check.
+    \subsection{Invalid Domain}
 
-Regarding $\mathcal{D}_{proxy}$ this means that when $\mathcal{D}_{target}$ is invalid the proxy domain is automatically considered invalid, and neither can be used.
+    A domain is considered invalid when the values it represents are no longer accessible or were destroyed. An invalid domain cannot be interacted with, if an access is tried this is considered to make this section unprovable and thus disproves the current check. An invalid domain is represented as $\mathcal{D}_\bot$, when this domain is found, the current proof is immediately considered false.
 
-\subsection{Structs}
+    An empty domain ($\emptyset$) is not automatically considered invalid, but when a transition $\delta$ wants to access the domain $\mathcal{D}$ the transition immediately collapses to $\bot$.
 
-The OAM understands structs and considers them as to be an ordered domain ($\mathcal{D}_{ordered}$), the domain of a struct is a cartesian product of all domains it includes.
+    Regarding $\mathcal{D}_{proxy}$ this means that when $\mathcal{D}_{target}$ is invalid, the proxy domain is automatically considered invalid, and neither can be used.
 
-\section{The Proof Graph}
+    \subsection{Structs}
 
-\subsection{State transitions}
+    The OAM understands structs and considers them as an ordered domain ($\mathcal{D}_{ordered}$), the domain of a struct is a cartesian product of all domains it includes.
 
-\subsubsection{Allowed Transitions}
+    \subsection{Capability}
 
-\subsection{Mapping logical memory to physical memory}
+    A capability describes an attribute that can be assigned to any node in $G$. Those capabilities can then be used as hints for checks. If a capability can be used by a check but is not explicitly required for this check, it is optimistic by assuming the non-existence mean this capability can be disregarded until disproven.
 
-\section{Formal Semantics}
+    \section{The Proof Graph}
 
-A program $P$ is considered proven if for all inputs $E\in\text{Domain}(E)$ the path through the OAM is finite and no invariant is violated.
+    \subsection{State transitions}
 
-The time-complexity $T(n)$ is not considered in the OAM. A program with $T(n)=O(2^n)$ is considered as secure as an identical program with $T(n)=O(1)$, as long as both terminate and do not violate any constraints.
+    A transition is the most basic operation, OAM can interpret and may change the state of $G$. The transitions are usable with almost any type of domain, but some exceptions exist
 
-\section{Otter Prove Archive (OPA)}
+    \begin{gather*}
+        \mathcal{E}=\{ \emptyset, \mathcal{D}_\bot \} \\
+        \forall \sigma \in \Sigma, \forall \mathcal{D} \in G: \delta(\mathcal{D}, \sigma) \notin \mathcal{D}_\bot \land \mathcal{D} \notin \mathcal{E}
+    \end{gather*}
 
-\subsection{Structure \& Contents}
+    A transition can generate an $\emptyset$ but no transition that interacts with a domain is allowed to accept an $\emptyset$, thus the domain has to be refined first. For example with a \textit{switch} or \textit{if}, this way a domain can be refined to be inhabited again.
 
-\subsection{Serialization}
+    \subsection{Mapping logical memory to physical memory}
 
-\subsection{Signing}
+    Pointer arithmetic is for most systems a dead end, the OAM abstracts away the physical addresses and is only concerned about the intent the developer writes. This means that a member access of a struct is nothing different than a $\mathcal{D}_{proxy}$ pointing to the member of the struct. This allows the OAM to freely reorder and change alignment of fields without the logic breaking, when running the OAM corrects the pointer calculation by the difference between the logical intent and the physical layout in the memory.
+
+    \begin{gather*}
+        ptr_{physical}=ptr_{logical}+\Delta mapping
+    \end{gather*}
+
+    \subsubsection{Allowed Transitions}
+
+    The OAM only supports a small set of transitions, from which more complex behavior emerges. In this section, we will only go over the transitions defined, not the emerging behavior.
+
+    \paragraph{Creating a Domain}
+
+    With the exception of the domain type $\mathcal{D}_{proxy}$ every newly created domain is added to the property graph $G$ as a node. A $\mathcal{D}_{proxy}$ is created as an edge, pointing from a node or the stack to any other domain. When no target is provided or the targeted node is invalid, the $\mathcal{D}_{proxy}$ can still be created.
+
+    \paragraph{Deleting a Domain}
+
+    When a node is deleted, all $\mathcal{D}_{proxy}$ that point to this node are transformed to $\mathcal{D}_\bot$.
+
+    \paragraph{Arithmetic operations on a domain}
+
+    You can not perform any arithmetic operations on a $\mathcal{D}_{ordered}$ or $\mathcal{D}_{mapped}$.
+
+    For $\mathcal{D}_{proxy}$ any arithmetic operation is shifting the reference to a different point in $G$, for this operation it has to be verified that any new reference within $G$ that is a valid outcome from the operation is a valid reference. A reference is valid, when the new $G_\iota$ is defined inside $G$ and can be accessed at this point.
+
+    For $\mathcal{D}_{atomic}$, an operation modifies the scalar value of the domain.
+
+    \paragraph{Assigning a domain}
+
+    When assigning something to a domain, the domain type has to be kept unmodified. The old domain, if present, is discarded and the new domain is used from here on out. If discarding the old domain causes other domains to be affected those need to be updated before proceeding.
+
+    \section{Formal Semantics}
+
+    A program $P$ is considered proven if for all inputs $E\in\text{Domain}(E)$ the path through the OAM is finite and no invariant is violated.
+
+    The time-complexity $T(n)$ is not considered in the OAM. A program with $T(n)=O(2^n)$ is considered as secure as an identical program with $T(n)=O(1)$, as long as both terminate and do not violate any constraints.
+
+    \section{Otter Proof Archive (OPA)}
+
+    \subsection{Structure \& Contents}
+
+    \subsection{Serialization}
+
+    \subsection{Signing}
 
 \end{document}
