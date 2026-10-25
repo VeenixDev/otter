@@ -90,6 +90,15 @@ class LLVMGenerator {
 				return this.generateExpression(node.data.expression);
 			case 'RETURN':
 				return `ret ${this.generateExpression(node.data.value)}`;
+			case 'VAR_DECL': // TODO: Finalize VAR_DECL
+				const dataType = this.generateType(node.data.type);
+				return `%${node.name} = alloca ${dataType}
+				store ${dataType} ${node.data.value}, ptr %${node.name}`;
+			case 'WHILE': // TODO: Implement loop generation
+				return `:loop_start
+				%cond = alloca i1
+				store i1 [${this.generateExpression(node.data.condition)}], ptr %cond
+				`
 			default:
 				throw new Error(
 					`LLVM Generator: Unexpected type ${node.type} for statement.`

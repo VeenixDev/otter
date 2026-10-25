@@ -147,6 +147,15 @@ type VariableSymbol = {
 	}
 }
 
+const comparativeBinaryOperations = [
+	'<',
+	'>',
+	'==',
+	'<=',
+	'>=',
+	'!='
+]
+
 class Checker {
 	private readonly ast: Statement[];
 	private checkedAst: CheckedStatement[];
@@ -371,6 +380,23 @@ class Checker {
 			return expression.data.type;
 		}
 
+		if (expression.type === 'BINARY_EXPRESSION') {
+			if (comparativeBinaryOperations.includes(expression.data.operator)) {
+				return {
+					typeName: 'boolean',
+					isPointer: false,
+					isPrimitive: true,
+					genericType: null,
+					isArray: false,
+					hasGeneric: false
+				};
+			}
+			console.warn(
+				'Not implemented yet! #getTypeFromExpression non comparative binary expression. Returning result type!'
+			);
+			return expression.data.resultType
+		}
+
 		return expression.data.resultType;
 	}
 
@@ -527,11 +553,19 @@ class Checker {
 			);
 		}
 
+		const condition = this.checkExpression(statement.data.condition);
+		const conditionType = this.getTypeFromExpression(condition);
+		const body = this.checkStatement(statement.data.body);
+
+		if (!this.compareTypes(conditionType, {genericType: null, hasGeneric: false, isArray: false, isPrimitive: true, isPointer: false, typeName: 'boolean'})) {
+			throw new Error(`Expected condition of while loop to have type boolean but got ${this.typeToString(conditionType)}.`);
+		}
+
 		return {
 			type: 'WHILE',
 			data: {
-				condition: this.checkExpression(statement.data.condition),
-				body: this.checkStatement(statement.data.body)
+				condition,
+				body
 			},
 			position: statement.position,
 		}
